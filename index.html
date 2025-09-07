@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>I'm Sorry My Bro — 2007 Edition</title>
+  <style>
+    html, body { height: 100%; margin: 0; background: #0a0a0a; }
+    body { display: grid; place-items: center; }
+    canvas { 
+      image-rendering: pixelated; 
+      image-rendering: crisp-edges; 
+      outline: 2px solid #000; 
+      box-shadow: 0 0 0 4px #111, 0 0 0 8px #000; /* chunky frame */
+      background: #0a0a0a;
+      cursor: crosshair;
+    }
+    .hud {
+      position: fixed; top: 10px; left: 10px; right: 10px; display: flex; justify-content: space-between; font-family: Courier, 'Courier New', monospace; color: #e5e5e5; text-shadow: 0 1px 0 #000;
+      mix-blend-mode: screen;
+      pointer-events: none;
+      font-size: 12px;
+    }
+    .hud .pill { background: linear-gradient(#1b1b1b, #0d0d0d); border: 1px solid #000; padding: 6px 10px; border-radius: 10px; box-shadow: inset 0 1px 0 #2b2b2b, 0 2px 0 #000; }
+    .footer { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); font-family: Courier, 'Courier New', monospace; color: #9e9e9e; font-size: 11px; text-shadow: 0 1px 0 #000; opacity: 0.8; }
+  </style>
+</head>
+<body>
+  <div class="hud">
+    <div class="pill">I'm Sorry My Bro — <strong>2007</strong></div>
+    <div class="pill" id="score">Bounces: 0 | Score: 0 / 4000</div>
+  </div>
+  <canvas id="game" width="720" height="540"></canvas>
+  <div class="footer">Click to launch the red ball. Touch black walls to bounce. Collide with the blue square and you lose. Press <strong>R</strong> to restart.</div>
+
+  <script>
+    (() => {
+      const canvas = document.getElementById('game');
+      const ctx = canvas.getContext('2d');
+      let W = canvas.width, H = canvas.height;
+
+      const wallThickness = 24;
+      const inner = { x: wallThickness, y: wallThickness, w: W - wallThickness*2, h: H - wallThickness*2 };
+
+      const player = { x: inner.x + inner.w * 0.25, y: inner.y + inner.h * 0.5, r: 10, vx: 0, vy: 0, speed: 280 };
+      const chaser = { x: inner.x + inner.w * 0.75, y: inner.y + inner.h * 0.5, size: 22, speed: 170 };
+
+      let bounces = 0;
+      let score = 0;
+      let lost = false;
+      let crashed = false;
+      let running = true;
+
+      const scoreEl = document.getElementById('score');
+
+      function drawScanlines() {
+        const lineH = 2;
+        ctx.globalAlpha = 0.06;
+        ctx.fillStyle = '#000';
+        for (let y = 0; y < H; y += lineH*2) ctx.fillRect(0, y, W, lineH);
+        ctx.globalAlpha = 1;
+      }
+
+      function reset() {
+        player.x = inner.x + inner.w * 0.25; player.y = inner.y + inner.h * 0.5; player.vx = 0; player.vy = 0;
+        chaser.x = inner.x + inner.w * 0.75; chaser.y = inner.y + inner.h * 0.5;
+        bounces = 0; score = 0; lost = false; crashed = false; running = true; updateHud();
+      }
+
+      function updateHud(){ scoreEl.textContent = `Bounces: ${bounces} | Score: ${score} / 4000`; }
+
+      function dirTo(ax, ay, bx, by) {
+        const dx = bx - ax, dy = by - ay; const d = Math.hypot(dx, dy) || 1; return { x: dx/d, y: dy/d };
+      }
+
+      function circleBoxCollision(cx, cy, r, bx, by, bw, bh) {
+        const nx = Math.max(bx, Math.min(cx, bx + bw));
+        const ny = Math.max(by, Math.min(cy, by + bh));
+        const dx = cx - nx, dy = cy - ny;
+        return (dx*dx + dy*dy) <= r*r;
+      }
+
+      function maybeIncreaseScore() {
+        const want = Math.min(4000, Math.floor(bounces / 20));
+        if (want > score) {
+          score = want;
+          if (score >= 4000) triggerCrash();
+        }
+      }
+
+      function triggerCrash() {
+        crashed = true;
+        running = false;
+        drawBSOD();
+      }
+
+      function step(dt) {
+        if (lost || crashed) { render(); return; }
+
+        player.x += player.vx * dt;
+        player.y += player.vy * dt;
+
+        if (player.x - player.r < inner.x) {
+          player.x = inner.x + player.r; player.vx *= -1; bounces++; updateHud(); maybeIncreaseScore();
+        } else if (player.x + player.r > inner.x + inner.w) {
+          player.x = inner.x + inner.w - player.r; player.vx *= -1; bounces++; updateHud(); maybeIncreaseScore();
+        }
+        if (player.y - player.r < inner.y) {
+          player.y = inner.y + player.r; player.vy *= -1; bounces++; updateHud(); maybeIncreaseScore();
+        } else if (player.y + player.r > inner.y + inner.h) {
+          player.y = inner.y + inner.h - player.r; player.vy *= -1; bounces++; updateHud(); maybeIncreaseScore();
+        }
+
+        const d = dirTo(chaser.x, chaser.y, player.x, player.y);
+        chaser.x += d.x * chaser.speed * dt;
+        chaser.y += d.y * chaser.speed * dt;
+
+        const hs = chaser.size/2;
+        chaser.x = Math.max(inner.x + hs, Math.min(chaser.x, inner.x + inner.w - hs));
+        chaser.y = Math.max(inner.y + hs, Math.min(chaser.y, inner.y + inner.h - hs));
+
+        if (circleBoxCollision(player.x, player.y, player.r, chaser.x - hs, chaser.y - hs, chaser.size, chaser.size)) {
+          lost = true;
+        }
+
+        render();
+      }
+
+      function render() {
+        const g = ctx.createRadialGradient(W/2, H/2, 50, W/2, H/2, Math.max(W, H));
+        g.addColorStop(0, '#111'); g.addColorStop(1, '#000');
+        ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, W, wallThickness);
+        ctx.fillRect(0, H - wallThickness, W, wallThickness);
+        ctx.fillRect(0, 0, wallThickness, H);
+        ctx.fillRect(W - wallThickness, 0, wallThickness, H);
+
+        ctx.strokeStyle = '#1c1c1c';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(inner.x + 1, inner.y + 1, inner.w - 2, inner.h - 2);
+
+        ctx.beginPath();
+        ctx.arc(player.x, player.y, player.r, 0, Math.PI*2);
+        ctx.closePath();
+        ctx.fillStyle = '#e11';
+        ctx.fill();
+        ctx.lineWidth = 2; ctx.strokeStyle = '#700'; ctx.stroke();
+
+        const hs = chaser.size/2;
+        ctx.fillStyle = '#19f';
+        ctx.fillRect(chaser.x - hs, chaser.y - hs, chaser.size, chaser.size);
+        ctx.strokeStyle = '#016'; ctx.lineWidth = 2; ctx.strokeRect(chaser.x - hs, chaser.y - hs, chaser.size, chaser.size);
+
+        drawScanlines();
+
+        if (lost) drawLoseScreen();
+        if (crashed) drawBSOD();
+      }
+
+      function drawLoseScreen() {
+        ctx.save();
+        ctx.fillStyle = 'rgba(0,0,0,0.95)';
+        ctx.fillRect(0, 0, W, H);
+
+        const off = document.createElement('canvas');
+        const scale = 4;
+        off.width = Math.floor(W / scale);
+        off.height = Math.floor(H / scale);
+        const octx = off.getContext('2d');
+        octx.imageSmoothingEnabled = false;
+        octx.fillStyle = '#fff';
+        octx.font = 'bold 12px Courier New, Courier, monospace';
+        octx.textAlign = 'center';
+        octx.textBaseline = 'middle';
+        octx.fillText('YOU LOST!', off.width/2, off.height/2 - 6);
+        octx.font = 'bold 8px Courier New, Courier, monospace';
+        octx.fillText('Press R to restart', off.width/2, off.height/2 + 10);
+
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(off, 0, 0, off.width, off.height, 0, 0, off.width*scale, off.height*scale);
+        ctx.restore();
+      }
+
+      function drawBSOD() {
+        ctx.save();
+        ctx.fillStyle = '#001a7a';
+        ctx.fillRect(0, 0, W, H);
+
+        const off = document.createElement('canvas');
+        const scale = 3;
+        off.width = Math.floor(W / scale);
+        off.height = Math.floor(H / scale);
+        const octx = off.getContext('2d');
+        octx.imageSmoothingEnabled = false;
+        octx.fillStyle = '#fff';
+        octx.textAlign = 'left';
+        octx.textBaseline = 'top';
+
+        const margin = 12;
+        const lines = [
+          ':(',
+          '',
+          'oops, you have reached the max score.',
+          'you have been playing for four or ten hours',
+          'max limit. please try again later.',
+          '',
+          'Press R to restart.'
+        ];
+
+        octx.font = 'bold 16px Courier New, Courier, monospace';
+        octx.fillText(lines[0], margin, margin);
+        octx.font = 'bold 10px Courier New, Courier, monospace';
+        let y = margin + 24;
+        for (let i = 2; i < lines.length; i++) {
+          octx.fillText(lines[i], margin, y);
+          y += 14;
+        }
+
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(off, 0, 0, off.width, off.height, 0, 0, off.width*scale, off.height*scale);
+        ctx.restore();
+      }
+
+      canvas.addEventListener('mousedown', (e) => {
+        if (lost || crashed) return;
+        const rect = canvas.getBoundingClientRect();
+        const mx = (e.clientX - rect.left) * (W / rect.width);
+        const my = (e.clientY - rect.top) * (H / rect.height);
+        const d = dirTo(player.x, player.y, mx, my);
+        player.vx = d.x * player.speed;
+        player.vy = d.y * player.speed;
+      });
+
+      window.addEventListener('keydown', (e) => {
+        if (e.key.toLowerCase() === 'r') reset();
+        if (e.key === '4') { // secret cheat key
+          score = 4000;
+          updateHud();
+          triggerCrash();
+        }
+      });
+
+      function fit() {
+        const maxW = Math.min(window.innerWidth - 24, 960);
+        const maxH = Math.min(window.innerHeight - 24, 720);
+        const scale = Math.min(maxW / W, maxH / H);
+        canvas.style.width = (W * scale) + 'px';
+        canvas.style.height = (H * scale) + 'px';
+      }
+      window.addEventListener('resize', fit);
+      fit();
+
+      let last = performance.now();
+      function loop(now) {
+        const dt = Math.min(0.033, (now - last) / 1000);
+        last = now;
+        step(dt);
+        if (running) requestAnimationFrame(loop);
+      }
+      reset();
+      requestAnimationFrame(loop);
+    })();
+  </script>
+</body>
+</html>
